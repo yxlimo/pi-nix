@@ -37,7 +37,7 @@ jobs:
         run: |
           set -euo pipefail
           latest="$(gh api repos/earendil-works/pi/tags --jq '.[0].name')"
-          current="$(grep -oP '(?<=ref=)[^"]+' flake.nix | head -1)"
+          current="$(grep -oP '(?<=refs/tags/)[^"]+' flake.nix | head -1)"
           echo "latest=${latest}" >> "$GITHUB_OUTPUT"
           echo "current=${current}" >> "$GITHUB_OUTPUT"
           if [ "$latest" = "$current" ]; then
@@ -54,7 +54,7 @@ jobs:
           set -euo pipefail
           old="${{ steps.upstream.outputs.current }}"
           new="${{ steps.upstream.outputs.latest }}"
-          sed -i "s|earendil-works/pi?ref=${old//./\\.}|earendil-works/pi?ref=${new}|" flake.nix
+          sed -i "s|earendil-works/pi?ref=refs/tags/${old//./\\.}|earendil-works/pi?ref=refs/tags/${new}|" flake.nix
           grep -n "pi-src.url" flake.nix
           nix flake update pi-src
 

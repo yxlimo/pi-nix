@@ -54,16 +54,16 @@
         "nixpkgs-darwin-x64": "nixpkgs-darwin-x64"
       },
       "locked": {
-        "lastModified": 1793714214,
-        "narHash": "sha256-3/SoftWaSM1n4aJoajCXEsVs6kz3KKyn4QlAtw+FhXw=",
-        "ref": "main",
-        "rev": "a57438e918350a2387d7518e46c74f367cc7feaf",
-        "revCount": 7422,
+        "lastModified": 1793615901,
+        "narHash": "sha256-ncZJzzmRVVdqKdTAR7QTW/HHmsLKEDWj1N1y1Ub60AE=",
+        "ref": "refs/tags/v1.5.0",
+        "rev": "f9a26365568127461c47a07a37dcb42c140a3ac5",
+        "revCount": 7350,
         "type": "git",
         "url": "https://github.com/earendil-works/pi"
       },
       "original": {
-        "ref": "main",
+        "ref": "refs/tags/v1.5.0",
         "type": "git",
         "url": "https://github.com/earendil-works/pi"
       }
