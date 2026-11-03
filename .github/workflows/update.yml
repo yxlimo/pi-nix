@@ -69,18 +69,31 @@ jobs:
           if [ "$before" = "$after" ]; then echo "changed=false" >> "$GITHUB_OUTPUT";
           else echo "changed=true" >> "$GITHUB_OUTPUT"; fi
 
-      - name: Build
+      - name: Refresh the npm artifact
+        if: steps.upstream.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          version="${{ steps.upstream.outputs.latest }}"
+          python3 scripts/update-npm-artifact.py "${version#v}"
+
+      - name: Build the source package
         run: nix build -L .#pi --no-link
 
-      - name: Smoke-test
+      - name: Build the npm package
+        run: nix build -L .#pi-npm --no-link
+
+      - name: Smoke-test both
         id: smoke
         run: |
           set -euo pipefail
+          for attr in pi pi-npm; do
+            out="$(nix build --no-link --print-out-paths ".#${attr}")"
+            version="$("$out/bin/pi" --version)"
+            "$out/bin/pi" --help > /dev/null
+            echo "${attr} -> pi ${version}"
+          done
           out="$(nix build --no-link --print-out-paths .#pi)"
-          version="$("$out/bin/pi" --version)"
-          "$out/bin/pi" --help > /dev/null
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-          echo "pi ${version}"
+          echo "version=$("$out/bin/pi" --version)" >> "$GITHUB_OUTPUT"
 
       - name: Verify the version matches the upstream tag
         if: steps.upstream.outputs.changed == 'true'
@@ -100,7 +113,8 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add flake.nix flake.lock packages/pi-model-catalog.json
+          git add flake.nix flake.lock packages/pi-model-catalog.json \
+            packages/pi-npm.nix npm/package.json npm/package-lock.json
           git diff --staged --quiet && exit 0
           git commit -m "chore: pi ${{ steps.upstream.outputs.latest }}, catalog ${{ steps.pin.outputs.revision }}"
           for attempt in 1 2 3; do

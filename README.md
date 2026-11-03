@@ -1,6 +1,7 @@
 # pi-nix
 
-`pi` built from source on Nix, with a model-catalog pin that CI keeps current.
+`pi` packaged for Nix, two ways: built from source, or unpacked from the
+published npm tarball. Both are kept current by CI.
 
 ## Why this exists
 
@@ -33,17 +34,47 @@ upstream CI substituted had 28, including one `classifier/typesafe-system-one`.
 This repo runs the same refresh in its own CI, then rebuilds and smoke-tests
 before committing. The flake input is buildable at any point in time.
 
+## Two installation paths
+
+| Attribute | What it installs | Needs | Fails when |
+|---|---|---|---|
+| `pi` | upstream source, compiled with `tsc` | the model-catalog pin to be fresh | catalog data drifts from the code's type expectations |
+| `pi-npm` | the published npm tarball, already compiled | nothing but the tarball | never from TypeScript |
+
+`pi-npm` sidesteps the entire catalog problem: the tarball is whatever upstream
+published, compiled by them. It costs reproducibility of the build itself (you
+trust their artifact) and gets no source audit. `pi` keeps the source path
+working and is what upstream's own CI validates.
+
+Prefer `pi-npm` unless you specifically want to build from source.
+
+### Why the npm path needs a generated lockfile
+
+The npm tarball ships compiled output but no `node_modules` — its 22 runtime
+dependencies still have to be fetched. Nix insists on a lockfile with an
+`integrity` hash per dependency, and pi's official installer lockfile omits that
+field on all eight `@earendil-works/*` packages
+([earendil-works/pi#4315](https://github.com/earendil-works/pi/issues/4315)).
+
+Upstream's own release metadata has them, though. `scripts/gen-npm-lock.py`
+takes the installer lockfile and fills those eight fields from
+`GET /api/installer/releases/<version>`, which publishes every package with its
+`integrity`. Both values come from the same release; nothing is recomputed.
+
 ## Usage
 
 ```nix
 {
   inputs.pi-nix.url = "github:yxlimo/pi-nix";
 
-  # either as a package
+  # prebuilt, recommended
+  environment.systemPackages = [ inputs.pi-nix.packages.${system}.pi-npm ];
+
+  # or from source
   environment.systemPackages = [ inputs.pi-nix.packages.${system}.pi ];
 
-  # or as an overlay
-  nixpkgs.overlays = [ inputs.pi-nix.overlays.default ];
+  # overlays work the same way
+  nixpkgs.overlays = [ inputs.pi-nix.overlays.npm ];    # or overlays.default
 }
 ```
 
@@ -61,10 +92,11 @@ GET /api/models?types=chat,image,classifier
 
 1. detect the newest upstream release tag and point `pi-src` at it
 2. `scripts/update-pin.py` — refresh `packages/pi-model-catalog.json`
-3. `nix build .#pi` — prove it works
-4. smoke-test `pi --version` / `pi --help`
-5. verify the built version matches the upstream tag
-6. commit, then tag this repo with the same version
+3. `scripts/update-npm-artifact.py` — refresh the tarball hash and lockfile
+4. `nix build .#pi` and `nix build .#pi-npm`
+5. smoke-test both: `pi --version` / `pi --help`
+6. verify the built version matches the upstream tag
+7. commit, then tag this repo with the same version
 
 Versions track upstream tags exactly: nothing is published here that upstream
 has not released.
@@ -79,7 +111,20 @@ pull a broken pin.
 | `flake.nix` | follows the newest upstream release tag + nixpkgs-unstable |
 | `packages/pi.nix` | replaces only the pin file, reuses upstream `nix/package.nix` |
 | `packages/pi-model-catalog.json` | the pin CI maintains |
-| `scripts/update-pin.py` | fetches and validates the current revision |
+| `packages/pi-npm.nix` | prebuilt npm tarball + generated lockfile |
+| `npm/package-lock.json` | installer lockfile with the eight missing hashes filled |
+| `scripts/update-pin.py` | fetches and validates the current catalog revision |
+| `scripts/gen-npm-lock.py` | rebuilds `npm/` from a release |
+| `scripts/update-npm-artifact.py` | bumps version, tarball hash, and lockfile |
+
+## Repair applied to the source path
+
+Upstream `v1.5.0` omits `@earendil-works/pi-schema` from `nix/package.nix` in
+both places that must agree: `installPhase` never packs `packages/schema`, and
+`packageSourceOverrides` has no entry for it, while the install lock ships that
+package without an integrity field. Evaluation failed on the missing integrity;
+patching only the override then failed on `schema.tgz` ENOENT. Both repairs are
+applied conditionally, so a tag that already carries them is used untouched.
 
 ## Notes
 

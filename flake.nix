@@ -24,12 +24,20 @@
         in
         {
           pi = pkgs.callPackage ./packages/pi.nix { inherit pi-src; };
+          # Second installation path: the published npm tarball, no source
+          # checkout and no TypeScript build.
+          pi-npm = pkgs.callPackage ./packages/pi-npm.nix { };
           default = self.packages.${system}.pi;
         }
       );
 
-      overlays.default = final: _prev: {
-        pi = final.callPackage ./packages/pi.nix { inherit pi-src; };
+      overlays = {
+        default = final: _prev: {
+          pi = final.callPackage ./packages/pi.nix { inherit pi-src; };
+        };
+        npm = final: _prev: {
+          pi = final.callPackage ./packages/pi-npm.nix { };
+        };
       };
     };
 }
