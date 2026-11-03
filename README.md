@@ -59,7 +59,7 @@ GET /api/models?types=chat,image,classifier
 
 `.github/workflows/update-pin.yml` runs daily, plus on manual dispatch:
 
-1. `nix flake update pi-src` — follow upstream `stable`
+1. `nix flake update pi-src` — follow upstream `main`
 2. `scripts/update-pin.py` — refresh `packages/pi-model-catalog.json`
 3. `nix build .#pi` — prove it works
 4. smoke-test `pi --version` / `pi --help`
@@ -72,7 +72,7 @@ pull a broken pin.
 
 | Path | Purpose |
 |---|---|
-| `flake.nix` | follows upstream `stable` + nixpkgs-unstable |
+| `flake.nix` | follows upstream `main` + nixpkgs-unstable |
 | `packages/pi.nix` | replaces only the pin file, reuses upstream `nix/package.nix` |
 | `packages/pi-model-catalog.json` | the pin CI maintains |
 | `scripts/update-pin.py` | fetches and validates the current revision |
