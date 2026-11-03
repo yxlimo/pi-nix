@@ -57,13 +57,17 @@ GET /api/models?types=chat,image,classifier
   -> body sha256 must equal it (content-addressed)
 ```
 
-`.github/workflows/update-pin.yml` runs daily, plus on manual dispatch:
+`.github/workflows/update.yml` runs daily, plus on manual dispatch:
 
-1. `nix flake update pi-src` — follow upstream `main`
+1. detect the newest upstream release tag and point `pi-src` at it
 2. `scripts/update-pin.py` — refresh `packages/pi-model-catalog.json`
 3. `nix build .#pi` — prove it works
 4. smoke-test `pi --version` / `pi --help`
-5. commit, only if the build succeeded
+5. verify the built version matches the upstream tag
+6. commit, then tag this repo with the same version
+
+Versions track upstream tags exactly: nothing is published here that upstream
+has not released.
 
 A failed build leaves the repo on the last known-good state, so consumers never
 pull a broken pin.
@@ -72,7 +76,7 @@ pull a broken pin.
 
 | Path | Purpose |
 |---|---|
-| `flake.nix` | follows upstream `main` + nixpkgs-unstable |
+| `flake.nix` | follows the newest upstream release tag + nixpkgs-unstable |
 | `packages/pi.nix` | replaces only the pin file, reuses upstream `nix/package.nix` |
 | `packages/pi-model-catalog.json` | the pin CI maintains |
 | `scripts/update-pin.py` | fetches and validates the current revision |

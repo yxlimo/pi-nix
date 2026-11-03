@@ -1,7 +1,8 @@
 {
   description = "pi coding agent built from source, with a CI-maintained model-catalog pin";
 
-  inputs.pi-src.url = "git+https://github.com/earendil-works/pi?ref=main";
+  # Upstream release tag. CI rewrites this line when upstream tags a new version.
+  inputs.pi-src.url = "git+https://github.com/earendil-works/pi?ref=v1.5.0";
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
   outputs =

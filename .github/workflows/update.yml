@@ -1,0 +1,123 @@
+name: Update
+
+# Mirrors upstream releases. When upstream tags a version, this workflow
+# advances the pi-src input to that tag, refreshes the model-catalog pin,
+# builds, and only then commits and tags the same version here.
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ github.token }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Find the latest upstream tag
+        id: upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          latest="$(gh api repos/earendil-works/pi/tags --jq '.[0].name')"
+          current="$(grep -oP '(?<=ref=)[^"]+' flake.nix | head -1)"
+          echo "latest=${latest}" >> "$GITHUB_OUTPUT"
+          echo "current=${current}" >> "$GITHUB_OUTPUT"
+          if [ "$latest" = "$current" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "already at ${current}"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "upstream tag: ${current} -> ${latest}"
+          fi
+
+      - name: Point pi-src at the new tag
+        if: steps.upstream.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          old="${{ steps.upstream.outputs.current }}"
+          new="${{ steps.upstream.outputs.latest }}"
+          sed -i "s|earendil-works/pi?ref=${old//./\\.}|earendil-works/pi?ref=${new}|" flake.nix
+          grep -n "pi-src.url" flake.nix
+          nix flake update pi-src
+
+      - name: Refresh the model catalog pin
+        id: pin
+        run: |
+          set -euo pipefail
+          before="$(python3 -c 'import json;print(json.load(open("packages/pi-model-catalog.json"))["revision"])' 2>/dev/null || echo none)"
+          python3 scripts/update-pin.py
+          after="$(python3 -c 'import json;print(json.load(open("packages/pi-model-catalog.json"))["revision"])')"
+          echo "revision=${after}" >> "$GITHUB_OUTPUT"
+          if [ "$before" = "$after" ]; then echo "changed=false" >> "$GITHUB_OUTPUT";
+          else echo "changed=true" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Build
+        run: nix build -L .#pi --no-link
+
+      - name: Smoke-test
+        id: smoke
+        run: |
+          set -euo pipefail
+          out="$(nix build --no-link --print-out-paths .#pi)"
+          version="$("$out/bin/pi" --version)"
+          "$out/bin/pi" --help > /dev/null
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "pi ${version}"
+
+      - name: Verify the version matches the upstream tag
+        if: steps.upstream.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          want="${{ steps.upstream.outputs.latest }}"
+          got="${{ steps.smoke.outputs.version }}"
+          if [ "v${got}" != "${want}" ]; then
+            echo "::error::built ${got} but the upstream tag is ${want}"
+            exit 1
+          fi
+
+      - name: Commit
+        if: |
+          steps.upstream.outputs.changed == 'true' || steps.pin.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add flake.nix flake.lock packages/pi-model-catalog.json
+          git diff --staged --quiet && exit 0
+          git commit -m "chore: pi ${{ steps.upstream.outputs.latest }}, catalog ${{ steps.pin.outputs.revision }}"
+          for attempt in 1 2 3; do
+            if git push origin HEAD:main; then exit 0; fi
+            sleep $((attempt * 5))
+            git pull --rebase origin main
+          done
+          exit 1
+
+      - name: Tag the same version
+        if: steps.upstream.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          tag="${{ steps.upstream.outputs.latest }}"
+          if git rev-parse -q --verify "refs/tags/${tag}" > /dev/null; then
+            echo "tag ${tag} already exists"
+          else
+            git tag -a "${tag}" -m "pi ${tag}"
+            git push origin "${tag}"
+          fi
