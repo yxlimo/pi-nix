@@ -124,14 +124,17 @@ jobs:
           done
           exit 1
 
-      - name: Tag the same version
-        if: steps.upstream.outputs.changed == 'true'
+      # Keyed on the version that was actually built, not on whether upstream
+      # moved this run: a tag can be missing because an earlier run failed, or
+      # because the pin was committed by hand.
+      - name: Tag the built version
         run: |
           set -euo pipefail
-          tag="${{ steps.upstream.outputs.latest }}"
+          tag="v${{ steps.smoke.outputs.version }}"
+          git fetch --tags --force origin > /dev/null 2>&1 || true
           if git rev-parse -q --verify "refs/tags/${tag}" > /dev/null; then
             echo "tag ${tag} already exists"
-          else
-            git tag -a "${tag}" -m "pi ${tag}"
-            git push origin "${tag}"
+            exit 0
           fi
+          git tag -a "${tag}" -m "pi ${tag}"
+          git push origin "${tag}"
