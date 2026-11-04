@@ -9,6 +9,17 @@
   ripgrep,
   wl-clipboard,
   xclip,
+  runCommandLocal,
+  # 拉包用的 registry。默认是官方 npm —— 本仓面向全球使用；
+  # 国内机器由 consumer 传镜像，例如：
+  #   (pi-nix.packages.x86_64-linux.pi-npm).override {
+  #     registry = "https://registry.npmmirror.com";
+  #   }
+  # 换源不会改变哈希：镜像与官方是同一份 tarball（实测 1.5.0 的
+  # dist.shasum 与 integrity 两边逐字节相同）；若哪天不一致，
+  # fetchurl 的哈希与 lock 里的 integrity 会让构建直接失败，
+  # 不会静默装进一份不同的代码。
+  registry ? "https://registry.npmjs.org",
 }:
 
 # pi built from the published npm tarball.
@@ -25,10 +36,32 @@
 let
   version = "1.5.0";
 
+  # 去掉可能的尾斜杠，否则会拼出 `//@earendil-works/...`
+  reg = lib.removeSuffix "/" registry;
+
   src = fetchurl {
-    url = "https://registry.npmjs.org/@earendil-works/pi-coding-agent/-/pi-coding-agent-${version}.tgz";
+    url = "${reg}/@earendil-works/pi-coding-agent/-/pi-coding-agent-${version}.tgz";
     hash = "sha256-W/tmhIpMS4HGN86NITa+AZRbcKrI6FVrCRywIkGzhd8=";
   };
+
+  # 依赖树来自 npm/package-lock.json，而那份 lock 里 122 条 "resolved" 全指向
+  # registry.npmjs.org —— 只换 tarball 的源不够，依赖还是会从官方拉。
+  # 所以在构建期把 lock 的 host 改掉；用默认 registry 时原样拷贝。
+  # integrity 字段不动：镜像给的包若与官方不同，npm 会自己校验失败。
+  npmRoot = runCommandLocal "pi-npm-root" { } ''
+    mkdir -p $out
+    cp ${../npm/package.json} $out/package.json
+    ${
+      lib.optionalString (reg != "https://registry.npmjs.org") ''
+        sed 's|https://registry.npmjs.org|${reg}|g' ${../npm/package-lock.json} > $out/package-lock.json
+      ''
+    }
+    ${
+      lib.optionalString (reg == "https://registry.npmjs.org") ''
+        cp ${../npm/package-lock.json} $out/package-lock.json
+      ''
+    }
+  '';
 in
 stdenv.mkDerivation {
   pname = "pi-npm";
@@ -37,7 +70,7 @@ stdenv.mkDerivation {
   # The npm tarball ships compiled output only. Dependencies still have to be
   # fetched, and they come from the generated lockfile.
   npmDeps = importNpmLock {
-    npmRoot = ../npm;
+    npmRoot = npmRoot;
   };
 
   nativeBuildInputs = [

@@ -4,16 +4,20 @@ name: Update
 # advances the pi-src input to that tag, refreshes the model-catalog pin and the
 # npm artifact, builds and smoke-tests both packages, commits, then publishes a
 # tag and a GitHub release for the built version.
-
+#
+# 触发方式（**没有 cron**）：
+#   · repository_dispatch（type=upstream-release）：由外部中继在 earendil-works/pi
+#     发版后触发（GitHub 不会把别人仓的 release 事件投递给本仓）；
+#   · workflow_dispatch：手动补跑，可指定 tag。
 on:
-  schedule:
-    - cron: "17 4 * * *"
   workflow_dispatch:
     inputs:
       ref:
         description: "Upstream tag to build (blank = newest)"
         required: false
         default: ""
+  repository_dispatch:
+    types: [ upstream-release ]
 
 permissions:
   contents: write
@@ -50,9 +54,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REQUESTED: ${{ inputs.ref }}
+          # 中继（Oracle 上的 gh-release-relay）dispatch 时带的版本号，
+          # 形如 1.5.0（已去掉前导 v）；这里是另一种入口，优先用它。
+          DISPATCHED: ${{ github.event.client_payload.version }}
         run: |
           set -euo pipefail
-          latest="${REQUESTED:-$(gh api repos/earendil-works/pi/tags --jq '.[0].name')}"
+          latest="${REQUESTED:-}"
+          if [ -z "$latest" ] && [ -n "${DISPATCHED:-}" ]; then
+            latest="v${DISPATCHED#v}"
+          fi
+          if [ -z "$latest" ]; then
+            latest="$(gh api repos/earendil-works/pi/tags --jq '.[0].name')"
+          fi
           current="$(grep -oP '(?<=refs/tags/)[^"]+' flake.nix | head -1)"
           echo "tag=${latest}" >> "$GITHUB_OUTPUT"
           echo "current=${current}" >> "$GITHUB_OUTPUT"
