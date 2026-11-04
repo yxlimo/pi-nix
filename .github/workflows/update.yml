@@ -1,13 +1,19 @@
 name: Update
 
 # Mirrors upstream releases. When upstream tags a version, this workflow
-# advances the pi-src input to that tag, refreshes the model-catalog pin,
-# builds, and only then commits and tags the same version here.
+# advances the pi-src input to that tag, refreshes the model-catalog pin and the
+# npm artifact, builds and smoke-tests both packages, commits, then publishes a
+# tag and a GitHub release for the built version.
 
 on:
   schedule:
     - cron: "17 4 * * *"
   workflow_dispatch:
+    inputs:
+      ref:
+        description: "Upstream tag to build (blank = newest)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -21,6 +27,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - uses: cachix/install-nix-action@v31
         with:
@@ -30,30 +38,38 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Find the latest upstream tag
+      # The tag step runs even when nothing changed, and it needs an identity.
+      - name: Configure git
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Resolve the upstream tag
         id: upstream
         env:
           GH_TOKEN: ${{ github.token }}
+          REQUESTED: ${{ inputs.ref }}
         run: |
           set -euo pipefail
-          latest="$(gh api repos/earendil-works/pi/tags --jq '.[0].name')"
+          latest="${REQUESTED:-$(gh api repos/earendil-works/pi/tags --jq '.[0].name')}"
           current="$(grep -oP '(?<=refs/tags/)[^"]+' flake.nix | head -1)"
-          echo "latest=${latest}" >> "$GITHUB_OUTPUT"
+          echo "tag=${latest}" >> "$GITHUB_OUTPUT"
           echo "current=${current}" >> "$GITHUB_OUTPUT"
           if [ "$latest" = "$current" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "already at ${current}"
+            echo "pi-src already at ${current}"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "upstream tag: ${current} -> ${latest}"
+            echo "pi-src: ${current} -> ${latest}"
           fi
 
-      - name: Point pi-src at the new tag
+      - name: Point pi-src at that tag
         if: steps.upstream.outputs.changed == 'true'
         run: |
           set -euo pipefail
           old="${{ steps.upstream.outputs.current }}"
-          new="${{ steps.upstream.outputs.latest }}"
+          new="${{ steps.upstream.outputs.tag }}"
           sed -i "s|earendil-works/pi?ref=refs/tags/${old//./\\.}|earendil-works/pi?ref=refs/tags/${new}|" flake.nix
           grep -n "pi-src.url" flake.nix
           nix flake update pi-src
@@ -69,12 +85,20 @@ jobs:
           if [ "$before" = "$after" ]; then echo "changed=false" >> "$GITHUB_OUTPUT";
           else echo "changed=true" >> "$GITHUB_OUTPUT"; fi
 
+      # Keyed on the upstream tag rather than on "did it move this run": the
+      # artifact has to match pi-src, whichever way we got there.
       - name: Refresh the npm artifact
-        if: steps.upstream.outputs.changed == 'true'
+        id: npm
         run: |
           set -euo pipefail
-          version="${{ steps.upstream.outputs.latest }}"
-          python3 scripts/update-npm-artifact.py "${version#v}"
+          tag="${{ steps.upstream.outputs.tag }}"
+          version="${tag#v}"
+          before="$(grep -oP '(?<=^\s*version = ")[^"]+' packages/pi-npm.nix | head -1)"
+          python3 scripts/update-npm-artifact.py "${version}"
+          after="$(grep -oP '(?<=^\s*version = ")[^"]+' packages/pi-npm.nix | head -1)"
+          echo "version=${after}" >> "$GITHUB_OUTPUT"
+          if [ "${before}" = "${after}" ]; then echo "changed=false" >> "$GITHUB_OUTPUT";
+          else echo "changed=true" >> "$GITHUB_OUTPUT"; fi
 
       - name: Build the source package
         run: nix build -L .#pi --no-link
@@ -92,31 +116,39 @@ jobs:
             "$out/bin/pi" --help > /dev/null
             echo "${attr} -> pi ${version}"
           done
-          out="$(nix build --no-link --print-out-paths .#pi)"
-          echo "version=$("$out/bin/pi" --version)" >> "$GITHUB_OUTPUT"
+          echo "version=$("$(nix build --no-link --print-out-paths .#pi)"/bin/pi --version)" >> "$GITHUB_OUTPUT"
 
-      - name: Verify the version matches the upstream tag
-        if: steps.upstream.outputs.changed == 'true'
+      - name: Verify both packages match the upstream tag
         run: |
           set -euo pipefail
-          want="${{ steps.upstream.outputs.latest }}"
-          got="${{ steps.smoke.outputs.version }}"
+          want="${{ steps.upstream.outputs.tag }}"
+          got="$(nix build --no-link --print-out-paths .#pi-npm | xargs -I{} {}/bin/pi --version)"
           if [ "v${got}" != "${want}" ]; then
             echo "::error::built ${got} but the upstream tag is ${want}"
             exit 1
           fi
 
-      - name: Commit
-        if: |
-          steps.upstream.outputs.changed == 'true' || steps.pin.outputs.changed == 'true'
+      - name: Verify the flake pins the tag we built
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          want="${{ steps.upstream.outputs.tag }}"
+          grep -F "refs/tags/${want}\"" flake.nix ||
+            { echo "::error::flake.nix does not pin ${want}"; exit 1; }
+
+      - name: Commit
+        if: |
+          steps.upstream.outputs.changed == 'true' ||
+          steps.pin.outputs.changed == 'true' ||
+          steps.npm.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
           git add flake.nix flake.lock packages/pi-model-catalog.json \
             packages/pi-npm.nix npm/package.json npm/package-lock.json
-          git diff --staged --quiet && exit 0
-          git commit -m "chore: pi ${{ steps.upstream.outputs.latest }}, catalog ${{ steps.pin.outputs.revision }}"
+          if git diff --staged --quiet; then
+            echo "nothing to commit"
+            exit 0
+          fi
+          git commit -m "chore: pi ${{ steps.smoke.outputs.version }}, catalog ${{ steps.pin.outputs.revision }}"
           for attempt in 1 2 3; do
             if git push origin HEAD:main; then exit 0; fi
             sleep $((attempt * 5))
@@ -124,17 +156,41 @@ jobs:
           done
           exit 1
 
-      # Keyed on the version that was actually built, not on whether upstream
-      # moved this run: a tag can be missing because an earlier run failed, or
-      # because the pin was committed by hand.
-      - name: Tag the built version
+      - name: Publish tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           tag="v${{ steps.smoke.outputs.version }}"
           git fetch --tags --force origin > /dev/null 2>&1 || true
+
           if git rev-parse -q --verify "refs/tags/${tag}" > /dev/null; then
             echo "tag ${tag} already exists"
+          else
+            git tag -a "${tag}" -m "pi ${tag}"
+            git push origin "${tag}"
+          fi
+
+          if gh release view "${tag}" > /dev/null 2>&1; then
+            echo "release ${tag} already exists"
             exit 0
           fi
-          git tag -a "${tag}" -m "pi ${tag}"
-          git push origin "${tag}"
+
+          notes="${RUNNER_TEMP}/release-notes.md"
+          {
+            echo "pi ${tag}, built twice from the same upstream release."
+            echo
+            echo "| Attribute | Installs |"
+            echo "|---|---|"
+            echo "| \`packages.<system>.pi-npm\` | prebuilt npm tarball |"
+            echo "| \`packages.<system>.pi\` | built from source |"
+            echo
+            echo '```nix'
+            echo "inputs.pi-nix.url = \"github:yxlimo/pi-nix/${tag}\";"
+            echo '```'
+            echo
+            echo "- upstream tag: ${tag}"
+            echo "- model catalog pin: \`${{ steps.pin.outputs.revision }}\`"
+          } > "${notes}"
+
+          gh release create "${tag}" --title "pi ${tag}" --notes-file "${notes}"
