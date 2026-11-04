@@ -3,6 +3,23 @@
 `pi` packaged for Nix, two ways: built from source, or unpacked from the
 published npm tarball. Both are kept current by CI.
 
+## Usage
+
+```nix
+{
+  inputs.pi-nix.url = "github:yxlimo/pi-nix";
+
+  # prebuilt, recommended
+  environment.systemPackages = [ inputs.pi-nix.packages.${system}.pi-npm ];
+
+  # or from source
+  environment.systemPackages = [ inputs.pi-nix.packages.${system}.pi ];
+
+  # overlays work the same way
+  nixpkgs.overlays = [ inputs.pi-nix.overlays.npm ];    # or overlays.default
+}
+```
+
 ## Two installation paths
 
 | Attribute | What it installs | Needs | Fails when |
@@ -71,23 +88,6 @@ Upstream's own release metadata has them, though. `scripts/gen-npm-lock.py`
 takes the installer lockfile and fills those eight fields from
 `GET /api/installer/releases/<version>`, which publishes every package with its
 `integrity`. Both values come from the same release; nothing is recomputed.
-
-## Usage
-
-```nix
-{
-  inputs.pi-nix.url = "github:yxlimo/pi-nix";
-
-  # prebuilt, recommended
-  environment.systemPackages = [ inputs.pi-nix.packages.${system}.pi-npm ];
-
-  # or from source
-  environment.systemPackages = [ inputs.pi-nix.packages.${system}.pi ];
-
-  # overlays work the same way
-  nixpkgs.overlays = [ inputs.pi-nix.overlays.npm ];    # or overlays.default
-}
-```
 
 ## Why this exists
 
