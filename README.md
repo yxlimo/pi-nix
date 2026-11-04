@@ -3,37 +3,6 @@
 `pi` packaged for Nix, two ways: built from source, or unpacked from the
 published npm tarball. Both are kept current by CI.
 
-## Why this exists
-
-Upstream `earendil-works/pi` ships a flake, but its `nix/package.nix` hydrates
-model data from a catalog pinned in `nix/model-catalog.json` — a static file.
-Only upstream's own CI replaces that pin before building:
-
-```yaml
-# .github/workflows/nix.yml (upstream)
-- run: node scripts/update-model-catalog-pin.mjs --if-stale
-- run: printf '{"revision":"%s"}' "$REVISION" > nix/model-catalog.json
-- run: nix build -L .
-```
-
-External consumers never run those steps. They get the static file, which goes
-stale as pi.dev publishes new catalogs (providers gain or lose classifier or
-api groups). When the pinned data lacks a group the code needs, the generated
-types collapse and the build dies:
-
-```
-src/providers/github-copilot.ts:33 TS2322
-Type 'unknown[]' is not assignable to type 'readonly ProviderModel<...>[]'
-```
-
-Measured 2026-11-03 at commit `d71c66e0`: upstream CI succeeded, while
-`nix build github:earendil-works/pi#pi` failed on the stale repo pin. The repo
-pin at that commit listed 27 `github-copilot` entries, all `chat`; the catalog
-upstream CI substituted had 28, including one `classifier/typesafe-system-one`.
-
-This repo runs the same refresh in its own CI, then rebuilds and smoke-tests
-before committing. The flake input is buildable at any point in time.
-
 ## Two installation paths
 
 | Attribute | What it installs | Needs | Fails when |
@@ -120,6 +89,37 @@ takes the installer lockfile and fills those eight fields from
 }
 ```
 
+## Why this exists
+
+Upstream `earendil-works/pi` ships a flake, but its `nix/package.nix` hydrates
+model data from a catalog pinned in `nix/model-catalog.json` — a static file.
+Only upstream's own CI replaces that pin before building:
+
+```yaml
+# .github/workflows/nix.yml (upstream)
+- run: node scripts/update-model-catalog-pin.mjs --if-stale
+- run: printf '{"revision":"%s"}' "$REVISION" > nix/model-catalog.json
+- run: nix build -L .
+```
+
+External consumers never run those steps. They get the static file, which goes
+stale as pi.dev publishes new catalogs (providers gain or lose classifier or
+api groups). When the pinned data lacks a group the code needs, the generated
+types collapse and the build dies:
+
+```
+src/providers/github-copilot.ts:33 TS2322
+Type 'unknown[]' is not assignable to type 'readonly ProviderModel<...>[]'
+```
+
+Measured 2026-11-03 at commit `d71c66e0`: upstream CI succeeded, while
+`nix build github:earendil-works/pi#pi` failed on the stale repo pin. The repo
+pin at that commit listed 27 `github-copilot` entries, all `chat`; the catalog
+upstream CI substituted had 28, including one `classifier/typesafe-system-one`.
+
+This repo runs the same refresh in its own CI, then rebuilds and smoke-tests
+before committing. The flake input is buildable at any point in time.
+
 ## How the pin stays valid
 
 Same discovery endpoint upstream CI uses:
@@ -146,19 +146,6 @@ has not released.
 A failed build leaves the repo on the last known-good state, so consumers never
 pull a broken pin.
 
-## Layout
-
-| Path | Purpose |
-|---|---|
-| `flake.nix` | follows the newest upstream release tag + nixpkgs-unstable |
-| `packages/pi.nix` | replaces only the pin file, reuses upstream `nix/package.nix` |
-| `packages/pi-model-catalog.json` | the pin CI maintains |
-| `packages/pi-npm.nix` | prebuilt npm tarball + generated lockfile |
-| `npm/package-lock.json` | installer lockfile with the eight missing hashes filled |
-| `scripts/update-pin.py` | fetches and validates the current catalog revision |
-| `scripts/gen-npm-lock.py` | rebuilds `npm/` from a release |
-| `scripts/update-npm-artifact.py` | bumps version, tarball hash, and lockfile |
-
 ## Repair applied to the source path
 
 Upstream `v1.5.0` omits `@earendil-works/pi-schema` from `nix/package.nix` in
@@ -176,3 +163,16 @@ imports that. Upstream reads only `model-catalog.json` relative to itself
 (`lib.importJSON ./model-catalog.json`); every other path goes through
 `source + "/..."`, so `source` still points at the untouched upstream tree and
 nothing is copied.
+## Layout
+
+| Path | Purpose |
+|---|---|
+| `flake.nix` | follows the newest upstream release tag + nixpkgs-unstable |
+| `packages/pi.nix` | replaces only the pin file, reuses upstream `nix/package.nix` |
+| `packages/pi-model-catalog.json` | the pin CI maintains |
+| `packages/pi-npm.nix` | prebuilt npm tarball + generated lockfile |
+| `npm/package-lock.json` | installer lockfile with the eight missing hashes filled |
+| `scripts/update-pin.py` | fetches and validates the current catalog revision |
+| `scripts/gen-npm-lock.py` | rebuilds `npm/` from a release |
+| `scripts/update-npm-artifact.py` | bumps version, tarball hash, and lockfile |
+
