@@ -65,7 +65,7 @@ the file is kept, and the file is only rewritten when the result differs.
   imports = [ inputs.pi-nix.homeModules.default ];
   # NixOS: imports = [ inputs.pi-nix.nixosModules.default ];
 
-  programs.pi = {
+  programs.pi.coding-agent = {
     enable = true;
 
     # pi packages (plugins); installed on first start.
@@ -83,8 +83,12 @@ the file is kept, and the file is only rewritten when the result differs.
     # models.json, installed once and then left alone
     models = ./models.json;
 
-    # exported before pi starts; `file` reads the file at launch
-    environment.OPENAI_API_KEY.file = "/run/secrets/openai-api-key";
+    # Where pi keeps its configuration. Optional; the default is ~/.pi/agent.
+    environment.PI_CODING_AGENT_DIR.value = "${config.home.homeDirectory}/.pi/agent";
+
+    # Exported before pi starts. `file` reads the file at launch, which is how a
+    # secret manager such as sops-nix hands over a credential.
+    environment.OPENAI_API_KEY.file = config.sops.secrets.openai-api-key.path;
   };
 }
 ```

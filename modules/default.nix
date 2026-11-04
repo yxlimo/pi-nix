@@ -13,7 +13,12 @@
   ...
 }:
 let
-  cfg = config.programs.pi;
+  optionPath = [
+    "programs"
+    "pi"
+    "coding-agent"
+  ];
+  cfg = lib.attrByPath optionPath { } config;
   inherit (pkgs.stdenv.hostPlatform) system;
 
   settingsJson =
@@ -72,10 +77,12 @@ let
 
   wrapped = pkgs.writeShellScriptBin "pi" ''
     set -eu
+    # Exported first: `environment` may itself set PI_CODING_AGENT_DIR, and the
+    # rest of this script has to use the value that ends up in effect.
+    ${envPrelude}
     PI_CODING_AGENT_DIR="''${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
     export PI_CODING_AGENT_DIR
 
-    ${envPrelude}
     ${modelsPrelude}
     ${mergePrelude "settings.json" settingsJson}
     ${mergePrelude "mcp.json" mcpJson}
@@ -84,7 +91,7 @@ let
   '';
 in
 {
-  options.programs.pi = {
+  options = lib.setAttrByPath optionPath {
     enable = lib.mkEnableOption "pi coding agent, with declarative configuration";
 
     package = lib.mkOption {
@@ -165,16 +172,26 @@ in
       '';
       example = lib.literalExpression ''
         {
-          OPENAI_API_KEY.file = "/run/secrets/openai-api-key";
+          PI_CODING_AGENT_DIR.value = "/home/user/.pi/agent";
+          OPENAI_API_KEY.file = config.sops.secrets.openai-api-key.path;
         }
       '';
+    };
+
+    finalPackage = lib.mkOption {
+      type = lib.types.package;
+      readOnly = true;
+      internal = true;
+      description = "The wrapped pi, for `lib.mkCodingAgent`-style consumers.";
+      default = wrapped;
+      defaultText = lib.literalExpression "<pi with the declared configuration merged in>";
     };
   };
 
   config = lib.mkIf cfg.enable (
-    if mode == "home" then
-      { home.packages = [ wrapped ]; }
-    else
-      { environment.systemPackages = [ wrapped ]; }
+      if mode == "home" then
+        { home.packages = [ cfg.finalPackage ]; }
+      else
+        { environment.systemPackages = [ cfg.finalPackage ]; }
   );
 }
