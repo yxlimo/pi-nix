@@ -5,20 +5,55 @@ published npm tarball. Both are kept current by CI.
 
 ## Usage
 
+Add the flake as an input:
+
 ```nix
 {
   inputs.pi-nix.url = "github:yxlimo/pi-nix";
 
-  # prebuilt, recommended
-  environment.systemPackages = [ inputs.pi-nix.packages.${system}.pi-npm ];
-
-  # or from source
-  environment.systemPackages = [ inputs.pi-nix.packages.${system}.pi ];
-
-  # overlays work the same way
-  nixpkgs.overlays = [ inputs.pi-nix.overlays.npm ];    # or overlays.default
+  # Optional, but avoids pulling a second copy of nixpkgs.
+  inputs.pi-nix.inputs.nixpkgs.follows = "nixpkgs";
 }
 ```
+
+It provides two packages on every supported platform:
+
+| Attribute | What it is |
+|---|---|
+| `packages.<system>.pi-npm` | the published npm tarball, already compiled (recommended, and the `default`) |
+| `packages.<system>.pi` | upstream source, compiled with `tsc` |
+
+Install one — NixOS, Home Manager and a devShell all use the same attribute path:
+
+```nix
+environment.systemPackages = [ inputs.pi-nix.packages.${pkgs.system}.pi-npm ];
+# or: home.packages = [ inputs.pi-nix.packages.${pkgs.system}.pi-npm ];
+```
+
+Try it without installing anything:
+
+```bash
+nix run github:yxlimo/pi-nix#pi-npm
+```
+
+Pin a release instead of tracking `main` (every release tag is built and
+smoke-tested by CI):
+
+```nix
+inputs.pi-nix.url = "github:yxlimo/pi-nix/v1.5.0";
+```
+
+If you would rather have `pkgs.pi` than a flake attribute, use an overlay:
+
+```nix
+nixpkgs.overlays = [ inputs.pi-nix.overlays.npm ];   # pi-npm
+# or inputs.pi-nix.overlays.default for the source build
+
+environment.systemPackages = [ pkgs.pi ];
+```
+
+Supported systems: `x86_64-linux`, `aarch64-linux`, `x86_64-darwin`,
+`aarch64-darwin`.
 
 ## Two installation paths
 
@@ -26,6 +61,10 @@ published npm tarball. Both are kept current by CI.
 |---|---|---|---|
 | `pi` | upstream source, compiled with `tsc` | the model-catalog pin to be fresh | catalog data drifts from the code's type expectations |
 | `pi-npm` | the published npm tarball, already compiled | nothing but the tarball | never from TypeScript |
+
+Pick `pi-npm` unless you specifically need to build from source: it is the
+`default` attribute, so `nix run github:yxlimo/pi-nix` and `nix build` give it
+without naming an attribute.
 
 `pi-npm` sidesteps the entire catalog problem: the tarball is whatever upstream
 published, compiled by them. It costs reproducibility of the build itself (you

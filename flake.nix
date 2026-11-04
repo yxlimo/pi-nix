@@ -27,7 +27,10 @@
           # Second installation path: the published npm tarball, no source
           # checkout and no TypeScript build.
           pi-npm = pkgs.callPackage ./packages/pi-npm.nix { };
-          default = self.packages.${system}.pi;
+          # `nix run` / `nix build` with no attribute should give the path the
+          # README recommends: the prebuilt tarball, which cannot fail on a
+          # stale model-catalog pin.
+          default = self.packages.${system}.pi-npm;
         }
       );
 
