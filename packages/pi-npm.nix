@@ -5,6 +5,10 @@
   fetchurl,
   importNpmLock,
   makeWrapper,
+  fd,
+  ripgrep,
+  wl-clipboard,
+  xclip,
 }:
 
 # pi built from the published npm tarball.
@@ -57,11 +61,33 @@ stdenv.mkDerivation {
     mkdir -p "$out/lib/node_modules/@earendil-works" "$out/bin"
 
     # The npm tarball unpacks to the source root and npmConfigHook installed
-    # node_modules beside it, so a single copy brings both.
+    # node_modules beside it. Copy both, but not the copy of this very package
+    # that node_modules holds as a dependency — link it back to the parent
+    # instead, which is what npm's own layout does.
     cp -R . "$pkgdir"
+    rm -rf "$pkgdir/node_modules/@earendil-works/pi-coding-agent"
+    ln -s ../.. "$pkgdir/node_modules/@earendil-works/pi-coding-agent"
 
+    # Node goes on PATH so pi can find npm for package installs, and is
+    # appended so shells started by the bash tool keep the user's own node.
+    # fd, ripgrep and the clipboard tools are pi's own dependencies and take
+    # precedence over whatever the user has. Same composition as upstream's
+    # nix/package.nix wrapper.
     makeWrapper ${nodejs_22}/bin/node "$out/bin/pi" \
-      --add-flags "$out/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"
+      --add-flags "$pkgdir/dist/bundle/cli.js" \
+      --suffix PATH : ${lib.makeBinPath [ nodejs_22 ]} \
+      --prefix PATH : ${
+        lib.makeBinPath (
+          [
+            fd
+            ripgrep
+          ]
+          ++ lib.optionals stdenv.hostPlatform.isLinux [
+            wl-clipboard
+            xclip
+          ]
+        )
+      }
 
     runHook postInstall
   '';

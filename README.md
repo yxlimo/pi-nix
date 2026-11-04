@@ -46,6 +46,48 @@ published, compiled by them. It costs reproducibility of the build itself (you
 trust their artifact) and gets no source audit. `pi` keeps the source path
 working and is what upstream's own CI validates.
 
+### Measured differences
+
+Both paths were built for v1.5.0 and compared boot for boot, on x86_64-linux,
+producing byte-identical store paths on two machines (Ubuntu and NixOS), so the
+builds are reproducible.
+
+| | `pi` (source) | `pi-npm` (prebuilt) |
+|---|---|---|
+| store size | 156 MB | 156 MB |
+| files | 15157 | 15156 |
+| runtime dependencies | 78, same versions | 78, same versions |
+| `dist/` size | 22 MB | 22 MB |
+| bundle chunks | 78 | 78 |
+| wrapper PATH entries | 5 (`node`, `fd`, `ripgrep`, `wl-clipboard`, `xclip`) | identical 5 |
+| `pi --help` | — | byte-for-byte identical |
+| `pi list`, `pi --list-models` | — | identical output |
+| **catalog entries embedded** | **962** | **960** |
+
+The only functional difference is the embedded model catalog:
+
+| only in `pi` | only in `pi-npm` |
+|---|---|
+| `chat:meituan/longcat-2.5` | `chat:meituan/longcat-2.5-preview` |
+| `chat:pulse-alpha-free` | `chat:meta-llama/llama-3.1-70b-instruct` |
+| `chat:z-ai/glm-5.3-flashx-legal` | `image:x-ai/grok-imagine-image-quality` |
+| `chat:zai/glm-5.3-flashx-legal` | |
+| `classifier:microsoft-decision-1` | |
+
+That is expected, not a defect. `pi` hydrates the catalog at build time from the
+pin this repository refreshes daily, so it carries the catalog as of the build.
+`pi-npm` carries whatever upstream compiled into the tarball on release day, and
+stays there. Neither is wrong; they are snapshots taken at different moments.
+`pi update models` refreshes either one at runtime.
+
+Two defects were found while comparing them, both now fixed in `pi-npm`:
+
+* the package's own copy inside `node_modules` was duplicated (182 MB instead of
+  156 MB); it is now a symlink back to the package root, matching npm's layout
+* the wrapper injected no PATH entries, so `fd`, `ripgrep` and the clipboard
+  tools — which pi's search and paste features shell out to — were missing. It
+  now composes the same PATH as upstream's `nix/package.nix`.
+
 Prefer `pi-npm` unless you specifically want to build from source.
 
 ### Why the npm path needs a generated lockfile
