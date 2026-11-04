@@ -42,5 +42,16 @@
           pi = final.callPackage ./packages/pi-npm.nix { };
         };
       };
+
+      # Same options in both; the only difference is where the wrapper is
+      # installed (home.packages vs environment.systemPackages).
+      homeModules = {
+        default = import ./modules { inherit self; mode = "home"; };
+      };
+      homeManagerModules = self.homeModules;
+
+      nixosModules = {
+        default = import ./modules { inherit self; mode = "system"; };
+      };
     };
 }

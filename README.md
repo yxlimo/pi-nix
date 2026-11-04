@@ -52,6 +52,60 @@ nixpkgs.overlays = [ inputs.pi-nix.overlays.npm ];   # pi-npm
 environment.systemPackages = [ pkgs.pi ];
 ```
 
+### Configuring pi
+
+pi writes to its own configuration files (`pi install` edits `settings.json`,
+`pi mcp add` edits `mcp.json`), so they cannot be read-only symlinks into the
+store. The module therefore installs a small wrapper that merges the values you
+declare into the real files at launch: declared keys win, everything already in
+the file is kept, and the file is only rewritten when the result differs.
+
+```nix
+{
+  imports = [ inputs.pi-nix.homeModules.default ];
+  # NixOS: imports = [ inputs.pi-nix.nixosModules.default ];
+
+  programs.pi = {
+    enable = true;
+
+    # pi packages (plugins); installed on first start.
+    settings.packages = [ "npm:@cortexkit/pi-magic-context" ];
+
+    # any other settings.json key
+    settings.model = "gpt-5";
+
+    # mcp.json, same shape as upstream
+    mcp.mcpServers.docs = {
+      url = "https://example.com/mcp";
+      headers.Authorization = "Bearer $DOCS_TOKEN";
+    };
+
+    # models.json, installed once and then left alone
+    models = ./models.json;
+
+    # exported before pi starts; `file` reads the file at launch
+    environment.OPENAI_API_KEY.file = "/run/secrets/openai-api-key";
+  };
+}
+```
+
+| Option | Type | Meaning |
+|---|---|---|
+| `enable` | bool | install the wrapped pi |
+| `package` | package | pi to wrap, defaults to this flake's `pi-npm`; set to `pi` for the source build |
+| `models` | path / null | `models.json`; installed only when the file is missing |
+| `settings` | attrs | `settings.json` contents, merged recursively at launch |
+| `mcp` | attrs | `mcp.json` contents, merged recursively at launch |
+| `environment` | attrs | `<NAME> = { file = …; }` or `{ value = …; }`, exported before launch |
+
+`environment.file` exists because systemd's `environment.d` only substitutes
+`${VAR}` references and never runs a command: reading a secret at launch is the
+job of the launcher. `environment.value` ends up in the Nix store, so keep
+secrets out of it.
+
+Removing a declaration does not remove the value from the file it was merged
+into; delete it there (or with `pi mcp remove`) as well.
+
 Supported systems: `x86_64-linux`, `aarch64-linux`, `x86_64-darwin`,
 `aarch64-darwin`.
 
