@@ -93,9 +93,9 @@ jobs:
           set -euo pipefail
           tag="${{ steps.upstream.outputs.tag }}"
           version="${tag#v}"
-          before="$(grep -oP '(?<=^\s*version = ")[^"]+' packages/pi-npm.nix | head -1)"
+          before="$(python3 -c 'import re,sys;print(re.search(r"version = \"([^\"]+)\"", open("packages/pi-npm.nix").read()).group(1))')"
           python3 scripts/update-npm-artifact.py "${version}"
-          after="$(grep -oP '(?<=^\s*version = ")[^"]+' packages/pi-npm.nix | head -1)"
+          after="$(python3 -c 'import re,sys;print(re.search(r"version = \"([^\"]+)\"", open("packages/pi-npm.nix").read()).group(1))')"
           echo "version=${after}" >> "$GITHUB_OUTPUT"
           if [ "${before}" = "${after}" ]; then echo "changed=false" >> "$GITHUB_OUTPUT";
           else echo "changed=true" >> "$GITHUB_OUTPUT"; fi
@@ -110,23 +110,29 @@ jobs:
         id: smoke
         run: |
           set -euo pipefail
+          source_version=""
           for attr in pi pi-npm; do
             out="$(nix build --no-link --print-out-paths ".#${attr}")"
             version="$("$out/bin/pi" --version)"
             "$out/bin/pi" --help > /dev/null
             echo "${attr} -> pi ${version}"
+            if [ "${attr}" = "pi" ]; then source_version="${version}"; fi
           done
-          echo "version=$("$(nix build --no-link --print-out-paths .#pi)"/bin/pi --version)" >> "$GITHUB_OUTPUT"
+          echo "version=${source_version}" >> "$GITHUB_OUTPUT"
 
       - name: Verify both packages match the upstream tag
         run: |
           set -euo pipefail
           want="${{ steps.upstream.outputs.tag }}"
-          got="$(nix build --no-link --print-out-paths .#pi-npm | xargs -I{} {}/bin/pi --version)"
-          if [ "v${got}" != "${want}" ]; then
-            echo "::error::built ${got} but the upstream tag is ${want}"
-            exit 1
-          fi
+          for attr in pi pi-npm; do
+            out="$(nix build --no-link --print-out-paths ".#${attr}")"
+            got="$("$out/bin/pi" --version)"
+            if [ "v${got}" != "${want}" ]; then
+              echo "::error::${attr} built pi ${got} but the upstream tag is ${want}"
+              exit 1
+            fi
+            echo "${attr}: ${got} matches ${want}"
+          done
 
       - name: Verify the flake pins the tag we built
         run: |
