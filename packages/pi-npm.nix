@@ -34,14 +34,14 @@
 # scripts/gen-npm-lock.py from the same release.
 
 let
-  version = "1.5.2";
+  version = "1.6.0";
 
   # 去掉可能的尾斜杠，否则会拼出 `//@earendil-works/...`
   reg = lib.removeSuffix "/" registry;
 
   src = fetchurl {
     url = "${reg}/@earendil-works/pi-coding-agent/-/pi-coding-agent-${version}.tgz";
-    hash = "sha256-aRveGGJztFfZ0cQdD9R7V4U7XoXe0a3Rofa3jmbCYfQ=";
+    hash = "sha256-hdXeQE4BnoUMkO6axtxsFiQNoSL9zgMUiVYIFkAwM2s=";
   };
 
   # 依赖树来自 npm/package-lock.json，而那份 lock 里 122 条 "resolved" 全指向
